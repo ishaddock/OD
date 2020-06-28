@@ -1,0 +1,102 @@
+from sqlalchemy import create_engine
+import pyodbc
+import pandas as pd
+import numpy as np
+import time
+
+# Connect to database
+engine = create_engine('mssql+pyodbc://**account：password**/**databasesname**_new?driver=SQL server')
+with engine.connect() as conn,conn.begin():
+    data = pd.read_sql_table('**tablename**',conn)
+dm = data[data['**VehicleSimID**'] == '**pick1**']
+dm = dm[['**VehicleSimID**','GPSTime','GPSLongitude','GPSLatitude','PassengerState']]
+dm.to_excel(r'**newfilename**.xlsx',sheet_name='**a**')
+
+gp = data.sort_values(by=['**VehicleSimID**','GPSTime']).groupby(by='VehicleSimID')
+
+#-------------------------------------------------
+# select O
+def get_orig():
+    appended_data = []
+    for dm in gp:
+        dm = list(dm)[1]
+        dm.reset_index(inplace=True)
+        if dm['PassengerState'][0] == 1:
+            df_first = dm.iloc[0:1,:]
+            Orig = dm['PassengerState'].diff() == 1
+            appended_data.append(df_first)
+            appended_data.append(dm[Orig])
+        else:
+            Orig = dm['PassengerState'].diff() == 1
+            appended_data.append(dm[Orig])
+    return appended_data
+
+data_o = get_orig()
+All_Orig = pd.concat(data_o,axis=0)
+All_Orig.to_csv(r'**filename**_Orig.csv')
+
+# select D
+def get_dest():
+    appended_data = []
+    for dm in gp:
+        dm = list(dm)[1]
+        Dest = dm['PassengerState'].shift(-1).diff() == -1
+        appended_data.append(dm[Dest])
+    return appended_data
+
+data_d = get_dest()
+All_Dest = pd.concat(data_d,axis=0)
+All_Dest.to_csv(r'**filename**_Dest.csv')
+
+#-------------------------------------------------
+# select OD connection
+def get_data(dt):
+    appended_data_orig = []
+    dm = list(dt)[1]
+    dm.reset_index(inplace=True)
+    if dm['PassengerState'][0] == 1:
+        df_first = dm.iloc[0:1, :]
+        Orig = dm['PassengerState'].diff() == 1
+        appended_data_orig.append(df_first)
+        appended_data_orig.append(dm[Orig])
+    else:
+        Orig = dm['PassengerState'].diff() == 1
+        appended_data_orig.append(dm[Orig])
+    ###################################################
+
+    appended_data_dest = []
+    dm = list(dt)[1]
+    Dest = dm['PassengerState'].shift(-1).diff() == -1
+    appended_data_dest.append(dm[Dest])
+    ###################################################
+    All_Orig = pd.concat(appended_data_orig, axis=0)
+    All_Dest = pd.concat(appended_data_dest, axis=0)
+
+    ###################################################
+    if len(All_Orig) > len(All_Dest):
+        number = len(All_Dest)
+    else:
+        number = len(All_Orig)
+
+    ###################################################
+    dk = pd.DataFrame(np.random.randn(int(number), 4),
+                      columns=['GPSLongitude_O', 'GPSLatitude_O', 'GPSLongitude_D', 'GPSLatitude_D'])
+
+    All_Orig.reset_index(inplace=True)
+    All_Dest.reset_index(inplace=True)
+
+    for i in range(0, int(number)):
+        dk['GPSLongitude_O'][i] = All_Orig['GPSLongitude'][i]
+        dk['GPSLatitude_O'][i] = All_Orig['GPSLatitude'][i]
+        dk['GPSLongitude_D'][i] = All_Dest['GPSLongitude'][i]
+        dk['GPSLatitude_D'][i] = All_Dest['GPSLatitude'][i]
+    return dk
+
+for dt in gp:
+    appended_data = get_data(dt)
+    appended_data.to_sql('OD_DATA',engine,if_exists='append')
+
+for dt in gp:
+    appended_data = get_data(dt)
+    appended_data.to_csv(r'**filename**.csv',mode='a',header=False,index=False)
+
