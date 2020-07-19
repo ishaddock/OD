@@ -1,4 +1,5 @@
 # A learning records
+Please look at code cleaning file.
 
 ### 1.sql sever
 show the data
